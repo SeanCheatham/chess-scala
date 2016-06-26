@@ -6,8 +6,8 @@ This library aims to serve two purposes:
 ## Contributing
 Users are more than welcome to contribute to this library.  It is open source, and you are
 free to use the code as you please.  When contributing to the project, please follow these guidelines:
-    - Document code whenever possible.  This is an "educational" library, so providing comments and notes will be very helpful
-    - Use a functional programming style whenever possible; however, since this is a chess engine, efficiency is also critical.  If efficiency would be sacrificed just for the sake of FP, don't use FP.
+* Document code whenever possible.  This is an "educational" library, so providing comments and notes will be very helpful
+* Use a functional programming style whenever possible; however, since this is a chess engine, efficiency is also critical.  If efficiency would be sacrificed just for the sake of FP, don't use FP.
 
 ## Installing
 ### git
