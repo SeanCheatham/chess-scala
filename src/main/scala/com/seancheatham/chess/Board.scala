@@ -1,5 +1,26 @@
 package com.seancheatham.chess
 
+/**
+  * The state representation of a chess board.
+  *
+  * A "Board" provides the functionality for search, evaluation, and move
+  * generation (the core components of a chess engine).
+  *
+  * @param pieces A sequence of Bytes of length 120.  An actual chess board consists of an 8x8 grid; however,
+  *               to allow for efficient move generation for knights, the board is padded by two squares on the top
+  *               and bottom, and one square on the left and right side.  This board is represented with
+  *               10 columns and 12 rows.  This improves move generation for knights by being able to detect
+  *               an "out-of-bounds" square without having to deal with null pointer exceptions.  It also
+  *               simplifies the math involved with move generation, since each row has ten slots,
+  *               which correspond nicely to base-10 arithmetic
+  * @param whiteToMove Flag indicating if it is White's turn to move.  False indicates it is Black's turn to move.
+  * @param blackKingCastleAvailable Flag indicating if the Black King-side Castle is still available
+  * @param blackQueenCastleAvailable Flag indicating if the Black Queen-side Castle is still available
+  * @param whiteKingCastleAvailable Flag indicating if the White King-side Castle is still available
+  * @param whiteQueenCastleAvailable Flag indicating if the White Queen-side Castle is still available
+  * @param enPassant An optional index to the "en passant" square from a previous move
+  * @param moveCount The number of moves which have occured on the board thus far
+  */
 case class Board(pieces: Vector[Byte],
                  whiteToMove: Boolean,
                  blackKingCastleAvailable: Boolean,
@@ -192,29 +213,76 @@ case class Board(pieces: Vector[Byte],
         }
         .map((index, _))
 
-    pieces
-      .indices
-      .toVector
-      .filter(index => if (whiteToMove) pieces(index).isWhite else pieces(index).isBlack)
-      .flatMap(index =>
-        pieces(index) match {
-          case `_I` | `_E` =>
-            Vector.empty
-          case `BP` | `WP` =>
-            pawn(index)
-          case `BB` | `WB` =>
-            diagonals(index)
-          case `BN` | `WN` =>
-            knight(index)
-          case `BR` | `WR` =>
-            rook(index)
-          case `BQ` | `WQ` =>
-            queen(index)
-          case `BK` | `WK` =>
-            king(index)
-        }
+    val bkCastle =
+      if (!whiteToMove &&
+        blackKingCastleAvailable &&
+        pieces(26).isEmpty &&
+        pieces(27).isEmpty
       )
-      .map { case (f, t) => (f.toByte, t.toByte) }
+        Some((25.toByte, 27.toByte))
+      else
+        None
+
+    val bqCastle =
+      if (!whiteToMove &&
+        blackQueenCastleAvailable &&
+        pieces(22).isEmpty &&
+        pieces(23).isEmpty &&
+        pieces(24).isEmpty
+      )
+        Some((25.toByte, 23.toByte))
+      else
+        None
+
+    val wkCastle =
+      if (whiteToMove &&
+        whiteKingCastleAvailable &&
+        pieces(96).isEmpty &&
+        pieces(97).isEmpty
+      )
+        Some((95.toByte, 97.toByte))
+      else
+        None
+
+    val wqCastle =
+      if (whiteToMove &&
+        whiteQueenCastleAvailable &&
+        pieces(92).isEmpty &&
+        pieces(93).isEmpty &&
+        pieces(94).isEmpty
+      )
+        Some((95.toByte, 93.toByte))
+      else
+        None
+
+    Vector(bkCastle, bqCastle, wkCastle, wqCastle).flatten ++
+      pieces
+        .indices
+        .toVector
+        .filter(index => if (whiteToMove) pieces(index).isWhite else pieces(index).isBlack)
+        .flatMap(index =>
+          pieces(index) match {
+            case `_I` | `_E` =>
+              Vector.empty
+            case `BP` | `WP` =>
+              pawn(index)
+            case `BB` | `WB` =>
+              bishop(index)
+            case `BN` | `WN` =>
+              knight(index)
+            case `BR` | `WR` =>
+              rook(index)
+            case `BQ` | `WQ` =>
+              queen(index)
+            case `BK` | `WK` =>
+              king(index)
+          }
+        )
+        .map { case (f, t) => (f.toByte, t.toByte) }
+        // To assist with the "pruning" in alpha/beta pruning, sort the result
+        // by the "weight" of the piece at the destination index.  Pieces
+        // with higher weights will be searched first.
+        .sortBy(move => -pieces(move._2).weight)
   }
 
   /**
@@ -274,10 +342,10 @@ case class Board(pieces: Vector[Byte],
         .updated(to.toInt, pieces(from.toInt))
         .updated(from.toInt, 1.toByte),
       !whiteToMove,
-      blackKingCastleAvailable || isBKCastle,
-      blackQueenCastleAvailable || isBQCastle,
-      whiteKingCastleAvailable || isWKCastle,
-      whiteQueenCastleAvailable || isWQCastle,
+      (blackKingCastleAvailable || isBKCastle) && from != 28 && from != 25,
+      (blackQueenCastleAvailable || isBQCastle) && from != 21 && from != 25,
+      (whiteKingCastleAvailable || isWKCastle) && from != 98 && from != 95,
+      (whiteQueenCastleAvailable || isWQCastle) && from != 91 && from != 95,
       newEnPassant,
       (moveCount + 1).toByte
     )
@@ -328,39 +396,31 @@ case class Board(pieces: Vector[Byte],
           .map(index =>
             pieces(index) match {
               case `_I` | `_E` =>
-                0
+                pieces(index).weight
               case `BP` =>
-                -P_WEIGHT *
+                -pieces(index).weight *
                   (1 -
                     (Range(index % 10, 98, 10)
                       .count(i => pieces(i) == BP) - 1) / 4
                     )
               case `BB` =>
-                -B_WEIGHT * bishopWeightFactor
+                -pieces(index).weight * bishopWeightFactor
               case `BN` =>
-                -N_WEIGHT * knightWeightFactor
-              case `BR` =>
-                -R_WEIGHT
-              case `BQ` =>
-                -Q_WEIGHT
-              case `BK` =>
-                -K_WEIGHT
+                -pieces(index).weight * knightWeightFactor
+              case `BR` | `BQ` | `BK` =>
+                -pieces(index).weight
               case `WP` =>
-                P_WEIGHT *
+                pieces(index).weight *
                   (1 -
                     (Range(index % 10, 98, 10)
                       .count(i => pieces(i) == WP) - 1) / 4
                     )
               case `WB` =>
-                B_WEIGHT * bishopWeightFactor
+                pieces(index).weight * bishopWeightFactor
               case `WN` =>
-                N_WEIGHT * knightWeightFactor
-              case `WR` =>
-                R_WEIGHT
-              case `WQ` =>
-                Q_WEIGHT
-              case `WK` =>
-                K_WEIGHT
+                pieces(index).weight * knightWeightFactor
+              case `WR` | `WQ` | `WK` =>
+                pieces(index).weight
             }
           )
           .sum
@@ -378,13 +438,13 @@ case class Board(pieces: Vector[Byte],
     availableMoves
       .par
       .map(m =>
-        m -> move(m._1, m._2).alphaBetaMax(-10000, 10000, depth)
+        m -> move(m._1, m._2).alphaBetaMax(Double.MinValue, Double.MaxValue, depth)
       )
       .maxBy(_._2)
       ._1
 
   /**
-    * Computes the "max" side of the alpha/beta search, by attempting to maximize the value returned
+    * Computes the "max" side of alpha/beta search, by attempting to maximize the value returned
     *
     * @param alpha          The "alpha" value
     * @param beta           The "beta" value
@@ -394,22 +454,24 @@ case class Board(pieces: Vector[Byte],
   def alphaBetaMax(alpha: Double, beta: Double, remainingDepth: Int): Double =
     if (remainingDepth <= 0)
       evaluate
-    else
-      availableMoves
-        .foldLeft(alpha) {
-          case (a, m) =>
-            val s =
-              move(m._1, m._2).alphaBetaMin(a, beta, remainingDepth - 1)
-            if (s >= beta)
-              return beta
-            if (s > a)
-              s
-            else
-              a
-        }
+    else {
+      var v = Double.MinValue
+      var a = alpha
+      val _availableMoves = availableMoves.iterator
+      var continue = true
+      while (continue && _availableMoves.hasNext) {
+        val (from, to) =
+          _availableMoves.next()
+        v = Math.max(v, move(from, to).alphaBetaMin(a, beta, remainingDepth - 1))
+        a = Math.max(a, v)
+        if (beta <= a)
+          continue = false
+      }
+      v
+    }
 
   /**
-    * Computes the "min" side of the alpha/beta search, by attempting to minimize the value returned
+    * Computes the "min" side of alpha/beta search, by attempting to minimize the value returned
     *
     * @param alpha          The "alpha" value
     * @param beta           The "beta" value
@@ -419,22 +481,25 @@ case class Board(pieces: Vector[Byte],
   def alphaBetaMin(alpha: Double, beta: Double, remainingDepth: Int): Double =
     if (remainingDepth <= 0)
       -evaluate
-    else
-      availableMoves
-        .foldLeft(beta) {
-          case (b, m) =>
-            val s =
-              move(m._1, m._2).alphaBetaMax(alpha, b, remainingDepth - 1)
-            if (s <= alpha)
-              return alpha
-            if (s < b)
-              s
-            else
-              b
-        }
+    else {
+      var v = Double.MaxValue
+      var b = beta
+      val _availableMoves = availableMoves.iterator
+      var continue = true
+      while (continue && _availableMoves.hasNext) {
+        val (from, to) =
+          _availableMoves.next()
+        v = Math.min(v, move(from, to).alphaBetaMax(alpha, b, remainingDepth - 1))
+        b = Math.min(b, v)
+        if (b <= alpha)
+          continue = false
+      }
+      v
+    }
 }
 
 object Board {
+
   final val default: Board =
     Board(
       DEFAULT_BOARD_SQUARES,
@@ -458,4 +523,5 @@ object Board {
       enPassant = None,
       moveCount = 14
     )
+
 }
