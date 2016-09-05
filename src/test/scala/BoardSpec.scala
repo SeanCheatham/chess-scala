@@ -31,7 +31,7 @@ class BoardSpec extends WordSpec {
       val board =
         Board.challenge
 
-      println(board.search(8))
+      println(Search()(board))
     }
   }
 
